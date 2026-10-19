@@ -1,0 +1,5 @@
+fastapi>=0.110
+uvicorn>=0.29
+redis>=5.0
+cassandra-driver>=3.29
+requests>=2.31

@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hệ thống thu thập lỗi ứng dụng</title>
+<link rel="icon" href="data:,">
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: Arial, Helvetica, sans-serif; background: #f3f5f8; color: #1f2937; }
+  header { background: #0b4f9c; color: #fff; padding: 14px 24px; display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+  header h1 { margin: 0; font-size: 20px; flex: 1; min-width: 260px; }
+  header label { font-size: 14px; }
+  header input { padding: 6px 8px; border: 0; border-radius: 4px; width: 130px; }
+  main { max-width: 1200px; margin: 18px auto; padding: 0 16px; display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 860px) { main { grid-template-columns: 1fr; } }
+  .card { background: #fff; border-radius: 8px; padding: 14px 16px; box-shadow: 0 1px 3px rgba(0,0,0,.12); }
+  .card.wide { grid-column: 1 / -1; }
+  .card h2 { margin: 0 0 4px; font-size: 16px; }
+  .tag { font-size: 12px; color: #6b7280; margin-bottom: 10px; display: block; }
+  .tag b { color: #0b4f9c; }
+  label.f { display: block; font-size: 13px; margin: 8px 0 3px; color: #374151; }
+  input, select, textarea { width: 100%; padding: 7px 8px; border: 1px solid #cbd5e1; border-radius: 4px; font: inherit; font-size: 14px; }
+  textarea { height: 64px; font-family: Consolas, monospace; font-size: 12px; }
+  .row { display: flex; gap: 10px; }
+  .row > div { flex: 1; }
+  button { background: #0b4f9c; color: #fff; border: 0; padding: 8px 14px; border-radius: 4px; cursor: pointer; font-size: 14px; }
+  button.alt { background: #b91c1c; }
+  button.ghost { background: #e5e7eb; color: #111; }
+  button:hover { opacity: .9; }
+  .btns { margin-top: 12px; display: flex; gap: 8px; flex-wrap: wrap; }
+  .stats { display: flex; gap: 10px; margin-top: 12px; }
+  .stat { flex: 1; text-align: center; border-radius: 6px; padding: 8px 4px; font-size: 13px; }
+  .stat b { display: block; font-size: 22px; }
+  .s-stored { background: #dcfce7; } .s-counted { background: #dbeafe; } .s-blocked { background: #fee2e2; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #e5e7eb; vertical-align: top; }
+  th { background: #f1f5f9; }
+  td.num { text-align: right; font-weight: bold; }
+  td.hash { font-family: Consolas, monospace; color: #6b7280; }
+  .empty { color: #9ca3af; font-size: 13px; padding: 8px 0; }
+  ul.recent { list-style: none; padding: 0; margin: 0; max-height: 260px; overflow: auto; font-family: Consolas, monospace; font-size: 12px; }
+  ul.recent li { padding: 4px 0; border-bottom: 1px dashed #e5e7eb; }
+  #msg { margin-top: 8px; font-size: 13px; min-height: 18px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Hệ thống thu thập lỗi ứng dụng — Cassandra &amp; Redis</h1>
+  <label>Ứng dụng (app_id) <input id="app" value="shop_app"></label>
+  <label><input type="checkbox" id="auto" checked style="width:auto"> Tự làm mới (3 giây)</label>
+</header>
+<main>
+  <section class="card">
+    <h2>1. Gửi log lỗi thử</h2>
+    <span class="tag">Chức năng: nhận log → <b>Redis</b> (rate-limit, dedup, gom nhóm) → <b>Cassandra</b> (ghi bền)</span>
+    <div class="row">
+      <div><label class="f">Thiết bị (device_id)</label><input id="device" value="device_882"></div>
+      <div><label class="f">Mức độ</label>
+        <select id="severity"><option>ERROR</option><option>FATAL</option><option>WARNING</option><option>INFO</option></select></div>
+    </div>
+    <label class="f">Loại lỗi (error_type)</label>
+    <select id="etype"><option>NullPointerException</option><option>ConnectionTimeout</option><option>OutOfMemoryError</option><option>SQLException</option></select>
+    <label class="f">Thông báo (message)</label><input id="message" value="cart is null">
+    <label class="f">Stack trace</label>
+    <textarea id="trace">java.lang.NullPointerException
+ at com.shop.Cart.add(Cart.java:42)
+ at com.shop.Main.run(Main.java:10)</textarea>
+    <div class="btns">
+      <button onclick="sendOne()">Gửi 1 log</button>
+      <button class="alt" onclick="spam()">Giả lập crash loop (150 log)</button>
+      <button class="ghost" onclick="clearStats()">Xoá bộ đếm</button>
+    </div>
+    <div class="stats">
+      <div class="stat s-stored"><b id="n-stored">0</b>Ghi chi tiết</div>
+      <div class="stat s-counted"><b id="n-counted">0</b>Chỉ đếm (dedup)</div>
+      <div class="stat s-blocked"><b id="n-blocked">0</b>Bị chặn (429)</div>
+    </div>
+    <div id="msg"></div>
+  </section>
+
+  <section class="card">
+    <h2>2. Top lỗi hôm nay</h2>
+    <span class="tag">Nguồn: <b>Redis</b> Sorted Set <code>errtrend</code> — ZREVRANGE</span>
+    <div id="top"></div>
+    <h2 style="margin-top:16px">3. Log mới nhất</h2>
+    <span class="tag">Nguồn: <b>Redis</b> List <code>recent_errors</code> — LRANGE</span>
+    <ul class="recent" id="recent"></ul>
+  </section>
+
+  <section class="card wide">
+    <h2>4. Nhóm lỗi và tổng số lần xảy ra</h2>
+    <span class="tag">Nguồn: <b>Cassandra</b> <code>error_groups</code> + <code>error_group_counter</code> — cập nhật sau mỗi lần worker đồng bộ (1 phút)</span>
+    <div id="groups"></div>
+  </section>
+
+  <section class="card">
+    <h2>5. Tra cứu log theo thiết bị</h2>
+    <span class="tag">Nguồn: <b>Cassandra</b> <code>error_logs_by_device</code> (ngày hôm nay, UTC)</span>
+    <div class="row">
+      <div><input id="qdevice" value="device_882"></div>
+      <div style="flex:0"><button onclick="loadDevice()">Tra cứu</button></div>
+    </div>
+    <div id="devlogs" style="margin-top:10px"></div>
+  </section>
+
+  <section class="card">
+    <h2>6. Xu hướng đã lưu theo ngày</h2>
+    <span class="tag">Nguồn: <b>Cassandra</b> <code>error_trend_daily</code> (snapshot do worker chụp)</span>
+    <div id="trend"></div>
+  </section>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const app = () => encodeURIComponent($("app").value.trim());
+const stats = {stored: 0, counted: 0, blocked: 0};
+const short = h => (h || "").slice(0, 10) + "…";
+const fmt = t => t ? new Date(t).toLocaleString("vi-VN") : "";
+
+function table(cols, rows) {
+  if (!rows.length) return '<div class="empty">Chưa có dữ liệu.</div>';
+  return "<table><tr>" + cols.map(c => `<th>${c[0]}</th>`).join("") + "</tr>" +
+    rows.map(r => "<tr>" + cols.map(c => `<td class="${c[2] || ""}">${c[1](r)}</td>`).join("") + "</tr>").join("") + "</table>";
+}
+function showStats() { for (const k in stats) $("n-" + k).textContent = stats[k]; }
+function clearStats() { for (const k in stats) stats[k] = 0; showStats(); $("msg").textContent = ""; }
+
+function body() {
+  return { app_id: $("app").value.trim(), device_id: $("device").value.trim(), error_type: $("etype").value,
+           severity: $("severity").value, message: $("message").value, stack_trace: $("trace").value,
+           environment: { os: "web-demo" } };
+}
+async function post() {
+  const r = await fetch("/logs", { method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body()) });
+  if (r.status === 429) { stats.blocked++; return "blocked"; }
+  if (!r.ok) throw new Error("HTTP " + r.status);
+  const j = await r.json(); stats[j.status]++; return j.status;
+}
+async function sendOne() {
+  try { const s = await post(); showStats();
+    $("msg").textContent = s === "stored" ? "Đã ghi chi tiết vào Cassandra." : s === "counted" ? "Lỗi lặp trong cửa sổ dedup: chỉ tăng bộ đếm." : "Bị chặn do vượt ngưỡng rate-limit (HTTP 429).";
+  } catch (e) { $("msg").textContent = "Lỗi: " + e.message; }
+  refresh();
+}
+async function spam() {
+  $("msg").textContent = "Đang gửi 150 log...";
+  try { for (let i = 0; i < 150; i++) { await post(); if (i % 10 === 0) showStats(); await new Promise(r => setTimeout(r, 20)); } showStats();
+    $("msg").textContent = "Xong: 100 log đầu được chấp nhận, từ log 101 bị chặn (429)."; }
+  catch (e) { $("msg").textContent = "Lỗi: " + e.message; }
+  refresh();
+}
+async function get(url) { const r = await fetch(url); if (!r.ok) throw new Error(url + " → " + r.status); return r.json(); }
+
+async function loadTop() {
+  try { $("top").innerHTML = table([["Loại lỗi", r => esc(r.error_type)], ["Mã nhóm", r => esc(short(r.error_hash)), "hash"], ["Số lần", r => r.count, "num"]],
+    await get(`/top/${app()}`)); } catch (e) { $("top").textContent = e.message; }
+}
+async function loadRecent() {
+  try { const l = await get(`/recent/${app()}`);
+    $("recent").innerHTML = l.length ? l.map(x => `<li>${esc(x)}</li>`).join("") : '<div class="empty">Chưa có dữ liệu.</div>'; } catch (e) { $("recent").textContent = e.message; }
+}
+async function loadGroups() {
+  try { $("groups").innerHTML = table([["Loại lỗi", r => esc(r.error_type)], ["Thông báo mẫu", r => esc(r.sample_message)], ["Mã nhóm", r => esc(short(r.error_hash)), "hash"],
+    ["Lần đầu thấy", r => fmt(r.first_seen)], ["Lần cuối thấy", r => fmt(r.last_seen)], ["Tổng số lần", r => r.occurrence_count, "num"]], await get(`/groups/${app()}`)); }
+  catch (e) { $("groups").textContent = e.message; }
+}
+async function loadDevice() {
+  try { $("devlogs").innerHTML = table([["Thời điểm", r => fmt(r.log_time)], ["Loại lỗi", r => esc(r.error_type)], ["Mức độ", r => esc(r.severity)], ["Thông báo", r => esc(r.message)]],
+    await get(`/device/${encodeURIComponent($("qdevice").value.trim())}`)); } catch (e) { $("devlogs").textContent = e.message; }
+}
+async function loadTrend() {
+  try { $("trend").innerHTML = table([["Hạng", r => r.rank], ["Mã nhóm", r => esc(short(r.error_hash)), "hash"], ["Số lần", r => r.occurrence_count, "num"]], await get(`/trend/${app()}`)); }
+  catch (e) { $("trend").textContent = e.message; }
+}
+function refresh() { loadTop(); loadRecent(); loadGroups(); loadTrend(); }
+refresh(); loadDevice();
+setInterval(() => { if ($("auto").checked) refresh(); }, 3000);
+</script>
+</body>
+</html>
