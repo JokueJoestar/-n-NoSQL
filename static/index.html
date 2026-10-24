@@ -3,180 +3,1238 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Hệ thống thu thập lỗi ứng dụng</title>
-<link rel="icon" href="data:,">
+<title>ErrLog — Hệ thống thu thập lỗi ứng dụng</title>
+<meta name="description" content="Dashboard giám sát lỗi ứng dụng thời gian thực sử dụng Cassandra và Redis">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔴</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
-  * { box-sizing: border-box; }
-  body { margin: 0; font-family: Arial, Helvetica, sans-serif; background: #f3f5f8; color: #1f2937; }
-  header { background: #0b4f9c; color: #fff; padding: 14px 24px; display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
-  header h1 { margin: 0; font-size: 20px; flex: 1; min-width: 260px; }
-  header label { font-size: 14px; }
-  header input { padding: 6px 8px; border: 0; border-radius: 4px; width: 130px; }
-  main { max-width: 1200px; margin: 18px auto; padding: 0 16px; display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-  @media (max-width: 860px) { main { grid-template-columns: 1fr; } }
-  .card { background: #fff; border-radius: 8px; padding: 14px 16px; box-shadow: 0 1px 3px rgba(0,0,0,.12); }
+  :root {
+    --bg:        #0a0e1a;
+    --surface:   #111827;
+    --surface2:  #1a2235;
+    --border:    rgba(255,255,255,0.08);
+    --border2:   rgba(255,255,255,0.14);
+    --text:      #e2e8f0;
+    --muted:     #64748b;
+    --accent:    #6366f1;
+    --accent2:   #818cf8;
+    --green:     #22c55e;
+    --blue:      #3b82f6;
+    --yellow:    #eab308;
+    --red:       #ef4444;
+    --orange:    #f97316;
+    --glow:      rgba(99,102,241,0.25);
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html { scroll-behavior: smooth; }
+
+  body {
+    font-family: 'Inter', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* ─── Animated background ─── */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background:
+      radial-gradient(ellipse 80% 40% at 20% 10%, rgba(99,102,241,0.12) 0%, transparent 60%),
+      radial-gradient(ellipse 60% 30% at 80% 80%, rgba(59,130,246,0.08) 0%, transparent 60%);
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  /* ─── Header ─── */
+  header {
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    background: rgba(10,14,26,0.85);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border-bottom: 1px solid var(--border);
+    padding: 0 24px;
+    height: 64px;
+    display: flex;
+    align-items: center;
+    gap: 20px;
+  }
+
+  .logo {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex: 1;
+    min-width: 0;
+  }
+
+  .logo-icon {
+    width: 36px; height: 36px;
+    background: linear-gradient(135deg, var(--accent), var(--blue));
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+    flex-shrink: 0;
+    box-shadow: 0 0 16px var(--glow);
+  }
+
+  .logo h1 {
+    font-size: 17px;
+    font-weight: 700;
+    background: linear-gradient(135deg, #fff 0%, var(--accent2) 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .logo span {
+    font-size: 11px;
+    font-weight: 400;
+    color: var(--muted);
+    -webkit-text-fill-color: var(--muted);
+    display: block;
+    margin-top: 1px;
+  }
+
+  .header-controls {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+
+  .pill-input {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--surface2);
+    border: 1px solid var(--border2);
+    border-radius: 8px;
+    padding: 6px 12px;
+    font-size: 13px;
+    color: var(--muted);
+  }
+
+  .pill-input input {
+    background: transparent;
+    border: none;
+    outline: none;
+    color: var(--text);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    width: 120px;
+  }
+
+  .toggle-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    font-size: 13px;
+    color: var(--muted);
+    white-space: nowrap;
+    user-select: none;
+  }
+
+  /* Custom toggle */
+  .toggle-wrap { position: relative; display: inline-block; width: 36px; height: 20px; }
+  .toggle-wrap input { opacity: 0; width: 0; height: 0; }
+  .slider {
+    position: absolute; inset: 0;
+    background: var(--surface2);
+    border: 1px solid var(--border2);
+    border-radius: 20px;
+    transition: background 0.2s;
+    cursor: pointer;
+  }
+  .slider::before {
+    content: '';
+    position: absolute;
+    width: 14px; height: 14px;
+    left: 2px; top: 2px;
+    background: var(--muted);
+    border-radius: 50%;
+    transition: transform 0.2s, background 0.2s;
+  }
+  .toggle-wrap input:checked + .slider { background: var(--accent); border-color: var(--accent); }
+  .toggle-wrap input:checked + .slider::before { transform: translateX(16px); background: #fff; }
+
+  .live-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--green);
+    box-shadow: 0 0 8px var(--green);
+    animation: pulse-dot 2s ease-in-out infinite;
+  }
+
+  @keyframes pulse-dot {
+    0%, 100% { opacity: 1; box-shadow: 0 0 8px var(--green); }
+    50% { opacity: 0.4; box-shadow: 0 0 2px var(--green); }
+  }
+
+  /* ─── Layout ─── */
+  main {
+    position: relative;
+    z-index: 1;
+    max-width: 1280px;
+    margin: 24px auto;
+    padding: 0 20px 40px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 18px;
+  }
+
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+
+  /* ─── Cards ─── */
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 20px;
+    position: relative;
+    overflow: hidden;
+    transition: border-color 0.2s, box-shadow 0.2s;
+  }
+
+  .card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, var(--accent), transparent);
+    opacity: 0;
+    transition: opacity 0.3s;
+  }
+
+  .card:hover {
+    border-color: var(--border2);
+    box-shadow: 0 4px 32px rgba(0,0,0,0.4);
+  }
+
+  .card:hover::before { opacity: 1; }
+
   .card.wide { grid-column: 1 / -1; }
-  .card h2 { margin: 0 0 4px; font-size: 16px; }
-  .tag { font-size: 12px; color: #6b7280; margin-bottom: 10px; display: block; }
-  .tag b { color: #0b4f9c; }
-  label.f { display: block; font-size: 13px; margin: 8px 0 3px; color: #374151; }
-  input, select, textarea { width: 100%; padding: 7px 8px; border: 1px solid #cbd5e1; border-radius: 4px; font: inherit; font-size: 14px; }
-  textarea { height: 64px; font-family: Consolas, monospace; font-size: 12px; }
+
+  .card-header {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+
+  .card-icon {
+    width: 38px; height: 38px;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 17px;
+    flex-shrink: 0;
+  }
+
+  .card-icon.purple { background: rgba(99,102,241,0.15); }
+  .card-icon.blue   { background: rgba(59,130,246,0.15); }
+  .card-icon.green  { background: rgba(34,197,94,0.15); }
+  .card-icon.orange { background: rgba(249,115,22,0.15); }
+  .card-icon.red    { background: rgba(239,68,68,0.15); }
+  .card-icon.teal   { background: rgba(20,184,166,0.15); }
+
+  .card-title-wrap { flex: 1; min-width: 0; }
+  .card-title-wrap h2 { font-size: 15px; font-weight: 600; color: var(--text); }
+
+  .card-source {
+    font-size: 11px;
+    color: var(--muted);
+    margin-top: 3px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+
+  .badge-source {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 7px;
+    border-radius: 20px;
+    font-size: 10px;
+    font-weight: 600;
+    font-family: 'JetBrains Mono', monospace;
+    letter-spacing: 0.02em;
+  }
+
+  .badge-source.redis  { background: rgba(239,68,68,0.15); color: #f87171; border: 1px solid rgba(239,68,68,0.25); }
+  .badge-source.cass   { background: rgba(59,130,246,0.15); color: #60a5fa; border: 1px solid rgba(59,130,246,0.25); }
+
+  /* ─── Form fields ─── */
+  label.fl { display: block; font-size: 12px; font-weight: 500; color: var(--muted); margin: 12px 0 5px; letter-spacing: 0.03em; text-transform: uppercase; }
+
+  input[type=text], input:not([type=checkbox]), select, textarea {
+    width: 100%;
+    background: var(--surface2);
+    border: 1px solid var(--border2);
+    border-radius: 8px;
+    padding: 9px 12px;
+    font-family: inherit;
+    font-size: 13px;
+    color: var(--text);
+    outline: none;
+    transition: border-color 0.2s, box-shadow 0.2s;
+    -webkit-appearance: none;
+  }
+
+  input:focus, select:focus, textarea:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(99,102,241,0.2);
+  }
+
+  select option { background: var(--surface2); }
+
+  textarea {
+    height: 72px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11.5px;
+    resize: vertical;
+  }
+
   .row { display: flex; gap: 10px; }
   .row > div { flex: 1; }
-  button { background: #0b4f9c; color: #fff; border: 0; padding: 8px 14px; border-radius: 4px; cursor: pointer; font-size: 14px; }
-  button.alt { background: #b91c1c; }
-  button.ghost { background: #e5e7eb; color: #111; }
-  button:hover { opacity: .9; }
-  .btns { margin-top: 12px; display: flex; gap: 8px; flex-wrap: wrap; }
-  .stats { display: flex; gap: 10px; margin-top: 12px; }
-  .stat { flex: 1; text-align: center; border-radius: 6px; padding: 8px 4px; font-size: 13px; }
-  .stat b { display: block; font-size: 22px; }
-  .s-stored { background: #dcfce7; } .s-counted { background: #dbeafe; } .s-blocked { background: #fee2e2; }
-  table { width: 100%; border-collapse: collapse; font-size: 13px; }
-  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #e5e7eb; vertical-align: top; }
-  th { background: #f1f5f9; }
-  td.num { text-align: right; font-weight: bold; }
-  td.hash { font-family: Consolas, monospace; color: #6b7280; }
-  .empty { color: #9ca3af; font-size: 13px; padding: 8px 0; }
-  ul.recent { list-style: none; padding: 0; margin: 0; max-height: 260px; overflow: auto; font-family: Consolas, monospace; font-size: 12px; }
-  ul.recent li { padding: 4px 0; border-bottom: 1px dashed #e5e7eb; }
-  #msg { margin-top: 8px; font-size: 13px; min-height: 18px; }
+
+  /* ─── Buttons ─── */
+  .btn-group { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 16px; }
+
+  button {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 9px 16px;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: 500;
+    transition: all 0.15s;
+    white-space: nowrap;
+  }
+
+  button:active { transform: scale(0.97); }
+
+  .btn-primary {
+    background: linear-gradient(135deg, var(--accent), #4f46e5);
+    color: #fff;
+    box-shadow: 0 2px 12px rgba(99,102,241,0.35);
+  }
+
+  .btn-primary:hover { box-shadow: 0 4px 20px rgba(99,102,241,0.5); filter: brightness(1.08); }
+
+  .btn-danger {
+    background: linear-gradient(135deg, #dc2626, #b91c1c);
+    color: #fff;
+    box-shadow: 0 2px 12px rgba(239,68,68,0.3);
+  }
+
+  .btn-danger:hover { filter: brightness(1.08); box-shadow: 0 4px 20px rgba(239,68,68,0.45); }
+
+  .btn-ghost {
+    background: var(--surface2);
+    border: 1px solid var(--border2);
+    color: var(--muted);
+  }
+
+  .btn-ghost:hover { border-color: var(--accent); color: var(--accent2); }
+
+  .btn-warning {
+    background: linear-gradient(135deg, #d97706, #b45309);
+    color: #fff;
+    box-shadow: 0 2px 12px rgba(217,119,6,0.3);
+  }
+
+  .btn-warning:hover { filter: brightness(1.08); }
+
+  /* Spinning button state */
+  button.loading { pointer-events: none; opacity: 0.7; }
+  button.loading .btn-icon::after { content: '⟳'; animation: spin 0.8s linear infinite; display: inline-block; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ─── Stat boxes ─── */
+  .stats-row {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+    margin-top: 16px;
+  }
+
+  .stat-box {
+    border-radius: 12px;
+    padding: 14px 10px;
+    text-align: center;
+    position: relative;
+    overflow: hidden;
+    transition: transform 0.15s;
+  }
+
+  .stat-box:hover { transform: translateY(-2px); }
+
+  .stat-box.green  { background: rgba(34,197,94,0.1);  border: 1px solid rgba(34,197,94,0.2); }
+  .stat-box.blue   { background: rgba(59,130,246,0.1); border: 1px solid rgba(59,130,246,0.2); }
+  .stat-box.red    { background: rgba(239,68,68,0.1);  border: 1px solid rgba(239,68,68,0.2); }
+
+  .stat-value {
+    font-size: 28px;
+    font-weight: 700;
+    font-family: 'JetBrains Mono', monospace;
+    display: block;
+    line-height: 1;
+    margin-bottom: 4px;
+    transition: all 0.3s;
+  }
+
+  .stat-box.green  .stat-value { color: var(--green); }
+  .stat-box.blue   .stat-value { color: var(--blue); }
+  .stat-box.red    .stat-value { color: var(--red); }
+
+  .stat-label {
+    font-size: 11px;
+    color: var(--muted);
+    font-weight: 500;
+  }
+
+  .stat-value.bump {
+    animation: bump 0.3s ease-out;
+  }
+
+  @keyframes bump {
+    0%   { transform: scale(1); }
+    50%  { transform: scale(1.2); }
+    100% { transform: scale(1); }
+  }
+
+  /* ─── Status message ─── */
+  #msg {
+    margin-top: 12px;
+    padding: 10px 14px;
+    border-radius: 8px;
+    font-size: 13px;
+    min-height: 40px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--muted);
+    transition: all 0.3s;
+  }
+
+  #msg.success { border-color: rgba(34,197,94,0.4); background: rgba(34,197,94,0.07); color: var(--green); }
+  #msg.info    { border-color: rgba(59,130,246,0.4); background: rgba(59,130,246,0.07); color: #60a5fa; }
+  #msg.warn    { border-color: rgba(234,179,8,0.4);  background: rgba(234,179,8,0.07);  color: #facc15; }
+  #msg.error   { border-color: rgba(239,68,68,0.4);  background: rgba(239,68,68,0.07);  color: #f87171; }
+
+  /* ─── Tables ─── */
+  .table-wrap { overflow-x: auto; border-radius: 10px; border: 1px solid var(--border); }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12.5px;
+    background: var(--surface);
+  }
+
+  thead th {
+    background: var(--surface2);
+    padding: 10px 12px;
+    text-align: left;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--muted);
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+  }
+
+  tbody td {
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: middle;
+    color: var(--text);
+    max-width: 260px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  tbody tr:last-child td { border-bottom: none; }
+
+  tbody tr {
+    transition: background 0.15s;
+  }
+
+  tbody tr:hover td { background: rgba(255,255,255,0.03); }
+
+  td.num { text-align: right; font-family: 'JetBrains Mono', monospace; font-weight: 600; color: var(--accent2); }
+  td.hash { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--muted); }
+  td.rank { text-align: center; }
+
+  .rank-badge {
+    display: inline-block;
+    width: 22px; height: 22px;
+    line-height: 22px;
+    text-align: center;
+    border-radius: 50%;
+    font-size: 11px;
+    font-weight: 700;
+  }
+
+  .rank-1 { background: rgba(234,179,8,0.2); color: #fbbf24; border: 1px solid rgba(234,179,8,0.4); }
+  .rank-2 { background: rgba(148,163,184,0.15); color: #94a3b8; border: 1px solid rgba(148,163,184,0.3); }
+  .rank-3 { background: rgba(180,83,9,0.15); color: #fb923c; border: 1px solid rgba(180,83,9,0.3); }
+  .rank-n { background: var(--surface2); color: var(--muted); }
+
+  /* ─── Severity badges ─── */
+  .sev {
+    display: inline-block;
+    padding: 3px 8px;
+    border-radius: 20px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    font-family: 'JetBrains Mono', monospace;
+  }
+
+  .sev-FATAL   { background: rgba(239,68,68,0.2);   color: #fca5a5; border: 1px solid rgba(239,68,68,0.4); }
+  .sev-ERROR   { background: rgba(249,115,22,0.2);  color: #fdba74; border: 1px solid rgba(249,115,22,0.4); }
+  .sev-WARNING { background: rgba(234,179,8,0.15);  color: #fde047; border: 1px solid rgba(234,179,8,0.3); }
+  .sev-INFO    { background: rgba(34,197,94,0.15);  color: #86efac; border: 1px solid rgba(34,197,94,0.3); }
+
+  /* ─── Recent logs ─── */
+  .log-list {
+    max-height: 280px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding-right: 4px;
+  }
+
+  .log-list::-webkit-scrollbar { width: 4px; }
+  .log-list::-webkit-scrollbar-track { background: transparent; }
+  .log-list::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 4px; }
+
+  .log-item {
+    padding: 8px 10px;
+    border-radius: 8px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--muted);
+    line-height: 1.5;
+    word-break: break-all;
+    animation: fadeIn 0.3s ease;
+  }
+
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(-4px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  /* ─── Empty state ─── */
+  .empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 32px 16px;
+    color: var(--muted);
+    font-size: 13px;
+    gap: 8px;
+    text-align: center;
+  }
+
+  .empty-icon { font-size: 32px; opacity: 0.5; }
+
+  /* ─── Device search ─── */
+  .search-row {
+    display: flex;
+    gap: 8px;
+  }
+
+  .search-row input { flex: 1; }
+
+  /* ─── Skeleton loader ─── */
+  .skeleton {
+    background: linear-gradient(90deg, var(--surface2) 25%, rgba(255,255,255,0.04) 50%, var(--surface2) 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite;
+    border-radius: 6px;
+    height: 14px;
+    margin: 6px 0;
+  }
+
+  @keyframes shimmer {
+    from { background-position: 200% 0; }
+    to   { background-position: -200% 0; }
+  }
+
+  /* ─── Admin panel ─── */
+  .admin-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  .admin-info {
+    flex: 1;
+    font-size: 12px;
+    color: var(--muted);
+    line-height: 1.5;
+  }
+
+  .confirm-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.7);
+    backdrop-filter: blur(6px);
+    z-index: 999;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    animation: fadeIn 0.15s ease;
+  }
+
+  .confirm-box {
+    background: var(--surface);
+    border: 1px solid var(--border2);
+    border-radius: 16px;
+    padding: 28px;
+    max-width: 400px;
+    width: 90%;
+    box-shadow: 0 24px 64px rgba(0,0,0,0.6);
+  }
+
+  .confirm-box h3 { font-size: 17px; margin-bottom: 8px; }
+  .confirm-box p  { font-size: 13px; color: var(--muted); margin-bottom: 20px; line-height: 1.6; }
+  .confirm-btns   { display: flex; gap: 10px; justify-content: flex-end; }
+
+  /* ─── Progress bar ─── */
+  .progress-bar {
+    height: 3px;
+    background: var(--surface2);
+    border-radius: 2px;
+    overflow: hidden;
+    margin-top: 8px;
+  }
+
+  .progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--accent), var(--blue));
+    border-radius: 2px;
+    transition: width 0.15s;
+  }
+
+  /* ─── Misc ─── */
+  .text-error-type {
+    font-weight: 600;
+    color: var(--text);
+    font-size: 12px;
+  }
+
+  .text-sm { font-size: 11.5px; }
+  .text-muted { color: var(--muted); }
+  .mt-8 { margin-top: 8px; }
+
+  .section-divider {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: 16px 0;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+
+  .section-divider::before, .section-divider::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: var(--border);
+  }
 </style>
 </head>
 <body>
+
+<!-- ─── HEADER ─── -->
 <header>
-  <h1>Hệ thống thu thập lỗi ứng dụng — Cassandra &amp; Redis</h1>
-  <label>Ứng dụng (app_id) <input id="app" value="shop_app"></label>
-  <label><input type="checkbox" id="auto" checked style="width:auto"> Tự làm mới (3 giây)</label>
-</header>
-<main>
-  <section class="card">
-    <h2>1. Gửi log lỗi thử</h2>
-    <span class="tag">Chức năng: nhận log → <b>Redis</b> (rate-limit, dedup, gom nhóm) → <b>Cassandra</b> (ghi bền)</span>
-    <div class="row">
-      <div><label class="f">Thiết bị (device_id)</label><input id="device" value="device_882"></div>
-      <div><label class="f">Mức độ</label>
-        <select id="severity"><option>ERROR</option><option>FATAL</option><option>WARNING</option><option>INFO</option></select></div>
+  <div class="logo">
+    <div class="logo-icon">🔴</div>
+    <div>
+      <h1>ErrLog Dashboard</h1>
+      <span>Cassandra + Redis · Realtime Error Collector</span>
     </div>
-    <label class="f">Loại lỗi (error_type)</label>
-    <select id="etype"><option>NullPointerException</option><option>ConnectionTimeout</option><option>OutOfMemoryError</option><option>SQLException</option></select>
-    <label class="f">Thông báo (message)</label><input id="message" value="cart is null">
-    <label class="f">Stack trace</label>
+  </div>
+
+  <div class="header-controls">
+    <div class="pill-input">
+      <span style="font-size:11px;text-transform:uppercase;letter-spacing:.05em">APP</span>
+      <input id="app" value="shop_app" placeholder="app_id" spellcheck="false">
+    </div>
+
+    <label class="toggle-label" for="auto">
+      <span class="live-dot" id="live-dot"></span>
+      <span>Live</span>
+      <div class="toggle-wrap">
+        <input type="checkbox" id="auto" checked>
+        <div class="slider"></div>
+      </div>
+    </label>
+  </div>
+</header>
+
+<!-- ─── MAIN ─── -->
+<main>
+
+  <!-- Card 1: Gửi log -->
+  <section class="card" id="card-send">
+    <div class="card-header">
+      <div class="card-icon purple">📤</div>
+      <div class="card-title-wrap">
+        <h2>Gửi log lỗi thử nghiệm</h2>
+        <div class="card-source">
+          <span class="badge-source redis">Redis</span> rate-limit · dedup · gom nhóm →
+          <span class="badge-source cass">Cassandra</span> ghi bền vững
+        </div>
+      </div>
+    </div>
+
+    <div class="row">
+      <div>
+        <label class="fl">Thiết bị (device_id)</label>
+        <select id="device"></select>
+      </div>
+      <div>
+        <label class="fl">Mức độ (severity)</label>
+        <select id="severity">
+          <option value="FATAL">FATAL</option>
+          <option value="ERROR" selected>ERROR</option>
+          <option value="WARNING">WARNING</option>
+          <option value="INFO">INFO</option>
+        </select>
+      </div>
+    </div>
+
+    <label class="fl">Loại lỗi (error_type)</label>
+    <select id="etype">
+      <option>NullPointerException</option>
+      <option>ConnectionTimeout</option>
+      <option>OutOfMemoryError</option>
+      <option>SQLException</option>
+      <option>IndexOutOfBoundsException</option>
+      <option>IllegalArgumentException</option>
+    </select>
+
+    <label class="fl">Thông báo (message)</label>
+    <input id="message" type="text" value="cart is null">
+
+    <label class="fl">Stack trace</label>
     <textarea id="trace">java.lang.NullPointerException
  at com.shop.Cart.add(Cart.java:42)
  at com.shop.Main.run(Main.java:10)</textarea>
-    <div class="btns">
-      <button onclick="sendOne()">Gửi 1 log</button>
-      <button class="alt" onclick="spam()">Giả lập crash loop (150 log)</button>
-      <button class="ghost" onclick="clearStats()">Xoá bộ đếm</button>
+
+    <div class="btn-group">
+      <button class="btn-primary" id="btn-send" onclick="sendOne()">
+        <span>▶</span> Gửi 1 log
+      </button>
+      <button class="btn-danger" id="btn-spam" onclick="spam()">
+        <span>⚡</span> Crash loop (150 log)
+      </button>
+      <button class="btn-ghost" onclick="clearStats()">
+        <span>↺</span> Xoá bộ đếm
+      </button>
     </div>
-    <div class="stats">
-      <div class="stat s-stored"><b id="n-stored">0</b>Ghi chi tiết</div>
-      <div class="stat s-counted"><b id="n-counted">0</b>Chỉ đếm (dedup)</div>
-      <div class="stat s-blocked"><b id="n-blocked">0</b>Bị chặn (429)</div>
+
+    <div class="stats-row">
+      <div class="stat-box green">
+        <span class="stat-value" id="n-stored">0</span>
+        <span class="stat-label">Ghi chi tiết</span>
+      </div>
+      <div class="stat-box blue">
+        <span class="stat-value" id="n-counted">0</span>
+        <span class="stat-label">Chỉ đếm (dedup)</span>
+      </div>
+      <div class="stat-box red">
+        <span class="stat-value" id="n-blocked">0</span>
+        <span class="stat-label">Bị chặn (429)</span>
+      </div>
     </div>
-    <div id="msg"></div>
+
+    <div id="spam-progress" style="display:none" class="mt-8">
+      <div style="font-size:11px;color:var(--muted);margin-bottom:4px" id="spam-label"></div>
+      <div class="progress-bar"><div class="progress-fill" id="progress-fill" style="width:0%"></div></div>
+    </div>
+
+    <div id="msg">📋 Nhập thông tin và bấm "Gửi 1 log" để kiểm thử.</div>
   </section>
 
-  <section class="card">
-    <h2>2. Top lỗi hôm nay</h2>
-    <span class="tag">Nguồn: <b>Redis</b> Sorted Set <code>errtrend</code> — ZREVRANGE</span>
+  <!-- Card 2+3: Top lỗi + Log mới nhất -->
+  <section class="card" id="card-top">
+    <div class="card-header">
+      <div class="card-icon red">🔥</div>
+      <div class="card-title-wrap">
+        <h2>Top lỗi hôm nay</h2>
+        <div class="card-source">
+          <span class="badge-source redis">Redis</span> Sorted Set <code>errtrend</code> · ZREVRANGE
+        </div>
+      </div>
+    </div>
     <div id="top"></div>
-    <h2 style="margin-top:16px">3. Log mới nhất</h2>
-    <span class="tag">Nguồn: <b>Redis</b> List <code>recent_errors</code> — LRANGE</span>
-    <ul class="recent" id="recent"></ul>
+
+    <div class="section-divider">Log mới nhất</div>
+
+    <div class="card-header" style="margin-bottom:10px">
+      <div class="card-icon blue">📋</div>
+      <div class="card-title-wrap">
+        <h2>Luồng log thời gian thực</h2>
+        <div class="card-source">
+          <span class="badge-source redis">Redis</span> List <code>recent_errors</code> · LRANGE
+        </div>
+      </div>
+    </div>
+    <div class="log-list" id="recent"></div>
   </section>
 
-  <section class="card wide">
-    <h2>4. Nhóm lỗi và tổng số lần xảy ra</h2>
-    <span class="tag">Nguồn: <b>Cassandra</b> <code>error_groups</code> + <code>error_group_counter</code> — cập nhật sau mỗi lần worker đồng bộ (1 phút)</span>
+  <!-- Card 4: Nhóm lỗi - full width -->
+  <section class="card wide" id="card-groups">
+    <div class="card-header">
+      <div class="card-icon teal">🗂️</div>
+      <div class="card-title-wrap">
+        <h2>Nhóm lỗi và tổng số lần xảy ra</h2>
+        <div class="card-source">
+          <span class="badge-source cass">Cassandra</span>
+          <code>error_groups</code> + <code>error_group_counter</code>
+          · cập nhật sau mỗi lần worker đồng bộ (1 phút)
+        </div>
+      </div>
+    </div>
     <div id="groups"></div>
   </section>
 
-  <section class="card">
-    <h2>5. Tra cứu log theo thiết bị</h2>
-    <span class="tag">Nguồn: <b>Cassandra</b> <code>error_logs_by_device</code> (ngày hôm nay, UTC)</span>
-    <div class="row">
-      <div><input id="qdevice" value="device_882"></div>
-      <div style="flex:0"><button onclick="loadDevice()">Tra cứu</button></div>
+  <!-- Card 5: Tra cứu thiết bị -->
+  <section class="card" id="card-device">
+    <div class="card-header">
+      <div class="card-icon green">📱</div>
+      <div class="card-title-wrap">
+        <h2>Tra cứu log theo thiết bị</h2>
+        <div class="card-source">
+          <span class="badge-source cass">Cassandra</span>
+          <code>error_logs_by_device</code> (ngày hôm nay, UTC)
+        </div>
+      </div>
     </div>
-    <div id="devlogs" style="margin-top:10px"></div>
+
+    <div class="search-row">
+      <select id="qdevice" style="flex:1"></select>
+      <button class="btn-primary" onclick="loadDevice()">🔍 Tra cứu</button>
+    </div>
+
+    <div id="devlogs" style="margin-top:14px"></div>
   </section>
 
-  <section class="card">
-    <h2>6. Xu hướng đã lưu theo ngày</h2>
-    <span class="tag">Nguồn: <b>Cassandra</b> <code>error_trend_daily</code> (snapshot do worker chụp)</span>
+  <!-- Card 6: Xu hướng -->
+  <section class="card" id="card-trend">
+    <div class="card-header">
+      <div class="card-icon orange">📈</div>
+      <div class="card-title-wrap">
+        <h2>Xu hướng lỗi đã lưu theo ngày</h2>
+        <div class="card-source">
+          <span class="badge-source cass">Cassandra</span>
+          <code>error_trend_daily</code> (snapshot do worker chụp)
+        </div>
+      </div>
+    </div>
     <div id="trend"></div>
   </section>
+
+  <!-- Card 7: Admin / Reset Redis -->
+  <section class="card wide" id="card-admin">
+    <div class="card-header">
+      <div class="card-icon red">⚙️</div>
+      <div class="card-title-wrap">
+        <h2>Quản trị hệ thống</h2>
+        <div class="card-source">Công cụ dành cho kịch bản kiểm thử</div>
+      </div>
+    </div>
+
+    <div class="admin-row">
+      <div class="admin-info">
+        <strong style="color:var(--text)">Reset Redis (FLUSHALL)</strong><br>
+        Xoá toàn bộ dữ liệu Redis: bộ đếm rate-limit, dedup keys, errtrend, errgroup, recent_errors.
+        Dùng để chạy lại kịch bản kiểm thử từ đầu. <strong style="color:#f87171">Không ảnh hưởng Cassandra.</strong>
+      </div>
+      <button class="btn-warning" id="btn-flush" onclick="confirmFlush('redis')">
+        🗑️ Reset Redis
+      </button>
+    </div>
+
+    <div style="height:1px;background:var(--border);margin:16px 0"></div>
+
+    <div class="admin-row">
+      <div class="admin-info">
+        <strong style="color:#f87171">Reset Cassandra (TRUNCATE 6 bảng)</strong><br>
+        Xoá toàn bộ dữ liệu Cassandra: error_logs, error_logs_by_device, error_logs_by_hash,
+        error_groups, error_group_counter, error_trend_daily.
+        <strong style="color:#f87171">Không thể hoàn tác!</strong>
+      </div>
+      <button class="btn-danger" id="btn-cass-reset" onclick="confirmFlush('cassandra')">
+        🗃️ Reset Cassandra
+      </button>
+    </div>
+  </section>
+
 </main>
 
+<!-- ─── CONFIRM MODAL ─── -->
+<div id="confirm-overlay" class="confirm-overlay" style="display:none">
+  <div class="confirm-box">
+    <h3 id="confirm-title">⚠️ Xác nhận Reset</h3>
+    <p id="confirm-body"></p>
+    <div class="confirm-btns">
+      <button class="btn-ghost" onclick="closeConfirm()">Huỷ</button>
+      <button id="confirm-ok" class="btn-warning" onclick="doConfirmedAction()">Xác nhận Reset</button>
+    </div>
+  </div>
+</div>
+
 <script>
+// ─── Helpers ───────────────────────────────────────────────────────────────
 const $ = id => document.getElementById(id);
-const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
-const app = () => encodeURIComponent($("app").value.trim());
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const app = () => $('app').value.trim() || 'shop_app';
+const appEnc = () => encodeURIComponent(app());
+
+// ─── Device dropdown helpers ────────────────────────────────────────────────
+const DEVICE_COUNT = 20;  // khớp với seed.py (20 thiết bị/app)
+
+function buildDeviceOptions(appId) {
+  const opts = [];
+  for (let i = 1; i <= DEVICE_COUNT; i++) {
+    const id = `${appId}_dev_${String(i).padStart(3, '0')}`;
+    opts.push(`<option value="${id}">${id}</option>`);
+  }
+  return opts.join('');
+}
+
+function syncDeviceDropdowns() {
+  const appId = app();
+  const html = buildDeviceOptions(appId);
+  $('device').innerHTML  = html;
+  $('qdevice').innerHTML = html;
+}
+
+// Gọi ngay lần đầu
+syncDeviceDropdowns();
+// Cập nhật khi đổi app_id
+$('app').addEventListener('input', syncDeviceDropdowns);
+const short = h => (h || '').slice(0, 10) + '…';
+const fmt = t => t ? new Date(t).toLocaleString('vi-VN') : '—';
 const stats = {stored: 0, counted: 0, blocked: 0};
-const short = h => (h || "").slice(0, 10) + "…";
-const fmt = t => t ? new Date(t).toLocaleString("vi-VN") : "";
+
+function sevBadge(s) {
+  const v = (s || 'ERROR').toUpperCase();
+  return `<span class="sev sev-${v}">${esc(v)}</span>`;
+}
+
+function rankBadge(n) {
+  const cls = n === 1 ? 'rank-1' : n === 2 ? 'rank-2' : n === 3 ? 'rank-3' : 'rank-n';
+  return `<span class="rank-badge ${cls}">${n}</span>`;
+}
 
 function table(cols, rows) {
-  if (!rows.length) return '<div class="empty">Chưa có dữ liệu.</div>';
-  return "<table><tr>" + cols.map(c => `<th>${c[0]}</th>`).join("") + "</tr>" +
-    rows.map(r => "<tr>" + cols.map(c => `<td class="${c[2] || ""}">${c[1](r)}</td>`).join("") + "</tr>").join("") + "</table>";
+  if (!rows.length) return `
+    <div class="empty">
+      <div class="empty-icon">📭</div>
+      <span>Chưa có dữ liệu</span>
+      <span class="text-sm text-muted">Gửi một vài log để bắt đầu</span>
+    </div>`;
+  return `<div class="table-wrap"><table>
+    <thead><tr>${cols.map(c => `<th>${c[0]}</th>`).join('')}</tr></thead>
+    <tbody>${rows.map(r =>
+      `<tr>${cols.map(c => `<td class="${c[2] || ''}">${c[1](r)}</td>`).join('')}</tr>`
+    ).join('')}</tbody>
+  </table></div>`;
 }
-function showStats() { for (const k in stats) $("n-" + k).textContent = stats[k]; }
-function clearStats() { for (const k in stats) stats[k] = 0; showStats(); $("msg").textContent = ""; }
 
+// ─── Stats ─────────────────────────────────────────────────────────────────
+function bumpVal(el) {
+  el.classList.remove('bump');
+  void el.offsetWidth; // reflow
+  el.classList.add('bump');
+}
+
+function showStats() {
+  for (const k in stats) {
+    const el = $('n-' + k);
+    if (el && el.textContent !== String(stats[k])) {
+      el.textContent = stats[k];
+      bumpVal(el);
+    }
+  }
+}
+
+function clearStats() {
+  for (const k in stats) stats[k] = 0;
+  showStats();
+  setMsg('↺ Đã xoá bộ đếm.', 'info');
+}
+
+// ─── Message ───────────────────────────────────────────────────────────────
+function setMsg(text, type = '') {
+  const el = $('msg');
+  el.textContent = text;
+  el.className = type || '';
+}
+
+// ─── Log payload ───────────────────────────────────────────────────────────
 function body() {
-  return { app_id: $("app").value.trim(), device_id: $("device").value.trim(), error_type: $("etype").value,
-           severity: $("severity").value, message: $("message").value, stack_trace: $("trace").value,
-           environment: { os: "web-demo" } };
+  return {
+    app_id: app(),
+    device_id: $('device').value,
+    error_type: $('etype').value,
+    severity: $('severity').value,
+    message: $('message').value,
+    stack_trace: $('trace').value,
+    environment: { os: 'web-demo' }
+  };
 }
-async function post() {
-  const r = await fetch("/logs", { method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body()) });
-  if (r.status === 429) { stats.blocked++; return "blocked"; }
-  if (!r.ok) throw new Error("HTTP " + r.status);
-  const j = await r.json(); stats[j.status]++; return j.status;
-}
-async function sendOne() {
-  try { const s = await post(); showStats();
-    $("msg").textContent = s === "stored" ? "Đã ghi chi tiết vào Cassandra." : s === "counted" ? "Lỗi lặp trong cửa sổ dedup: chỉ tăng bộ đếm." : "Bị chặn do vượt ngưỡng rate-limit (HTTP 429).";
-  } catch (e) { $("msg").textContent = "Lỗi: " + e.message; }
-  refresh();
-}
-async function spam() {
-  $("msg").textContent = "Đang gửi 150 log...";
-  try { for (let i = 0; i < 150; i++) { await post(); if (i % 10 === 0) showStats(); await new Promise(r => setTimeout(r, 20)); } showStats();
-    $("msg").textContent = "Xong: 100 log đầu được chấp nhận, từ log 101 bị chặn (429)."; }
-  catch (e) { $("msg").textContent = "Lỗi: " + e.message; }
-  refresh();
-}
-async function get(url) { const r = await fetch(url); if (!r.ok) throw new Error(url + " → " + r.status); return r.json(); }
 
+async function post() {
+  const r = await fetch('/logs', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(body())
+  });
+  if (r.status === 429) { stats.blocked++; return 'blocked'; }
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  const j = await r.json();
+  stats[j.status]++;
+  return j.status;
+}
+
+// ─── Send one ──────────────────────────────────────────────────────────────
+async function sendOne() {
+  const btn = $('btn-send');
+  btn.classList.add('loading');
+  try {
+    const s = await post();
+    showStats();
+    if (s === 'stored')  setMsg('✅ Đã ghi chi tiết vào Cassandra (3 bảng song song).', 'success');
+    else if (s === 'counted') setMsg('🔵 Lỗi lặp trong cửa sổ dedup — chỉ tăng bộ đếm Redis.', 'info');
+    else setMsg('🚫 Bị chặn do vượt ngưỡng rate-limit (HTTP 429).', 'warn');
+  } catch (e) {
+    setMsg('❌ Lỗi kết nối: ' + e.message, 'error');
+  }
+  btn.classList.remove('loading');
+  refresh();
+}
+
+// ─── Spam / crash loop ─────────────────────────────────────────────────────
+let spamRunning = false;
+
+async function spam() {
+  if (spamRunning) return;
+  spamRunning = true;
+  const btn = $('btn-spam');
+  const prog = $('spam-progress');
+  const fill = $('progress-fill');
+  const lbl  = $('spam-label');
+  btn.disabled = true;
+  prog.style.display = 'block';
+  setMsg('⚡ Đang gửi 150 log liên tục…', 'info');
+
+  try {
+    for (let i = 0; i < 150; i++) {
+      await post();
+      if (i % 5 === 0) {
+        showStats();
+        const pct = Math.round((i / 150) * 100);
+        fill.style.width = pct + '%';
+        lbl.textContent = `Đang gửi… ${i+1}/150 (${pct}%)`;
+        await new Promise(r => setTimeout(r, 20));
+      }
+    }
+    showStats();
+    fill.style.width = '100%';
+    lbl.textContent = 'Hoàn thành 150/150';
+    setMsg('✅ Xong: ~100 log đầu được chấp nhận, từ log 101 bị chặn (429).', 'success');
+  } catch (e) {
+    setMsg('❌ Lỗi: ' + e.message, 'error');
+  }
+
+  btn.disabled = false;
+  spamRunning = false;
+  refresh();
+}
+
+// ─── Fetch helpers ─────────────────────────────────────────────────────────
+async function get(url) {
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(url + ' → ' + r.status);
+  return r.json();
+}
+
+// ─── Load sections ─────────────────────────────────────────────────────────
 async function loadTop() {
-  try { $("top").innerHTML = table([["Loại lỗi", r => esc(r.error_type)], ["Mã nhóm", r => esc(short(r.error_hash)), "hash"], ["Số lần", r => r.count, "num"]],
-    await get(`/top/${app()}`)); } catch (e) { $("top").textContent = e.message; }
+  try {
+    const rows = await get(`/top/${appEnc()}`);
+    $('top').innerHTML = table(
+      [
+        ['Loại lỗi', r => `<span class="text-error-type">${esc(r.error_type)}</span>`],
+        ['Thông báo mẫu', r => `<span class="text-muted text-sm">${esc((r.sample_message||'').slice(0,60))}</span>`],
+        ['Mã nhóm', r => esc(short(r.error_hash)), 'hash'],
+        ['Số lần', r => r.count, 'num'],
+      ],
+      rows
+    );
+  } catch (e) { $('top').textContent = '⚠ ' + e.message; }
 }
+
 async function loadRecent() {
-  try { const l = await get(`/recent/${app()}`);
-    $("recent").innerHTML = l.length ? l.map(x => `<li>${esc(x)}</li>`).join("") : '<div class="empty">Chưa có dữ liệu.</div>'; } catch (e) { $("recent").textContent = e.message; }
+  try {
+    const list = await get(`/recent/${appEnc()}`);  
+    $('recent').innerHTML = list.length
+      ? list.map(x => `<div class="log-item">${esc(x)}</div>`).join('')
+      : `<div class="empty"><div class="empty-icon">📭</div><span>Chưa có log nào</span></div>`;
+  } catch (e) { $('recent').textContent = '⚠ ' + e.message; }
 }
+
 async function loadGroups() {
-  try { $("groups").innerHTML = table([["Loại lỗi", r => esc(r.error_type)], ["Thông báo mẫu", r => esc(r.sample_message)], ["Mã nhóm", r => esc(short(r.error_hash)), "hash"],
-    ["Lần đầu thấy", r => fmt(r.first_seen)], ["Lần cuối thấy", r => fmt(r.last_seen)], ["Tổng số lần", r => r.occurrence_count, "num"]], await get(`/groups/${app()}`)); }
-  catch (e) { $("groups").textContent = e.message; }
+  try {
+    const rows = await get(`/groups/${appEnc()}`);
+    $('groups').innerHTML = table(
+      [
+        ['Loại lỗi', r => `<span class="text-error-type">${esc(r.error_type)}</span>`],
+        ['Thông báo mẫu', r => `<span class="text-muted text-sm">${esc((r.sample_message||'').slice(0,80))}</span>`],
+        ['Mã nhóm', r => esc(short(r.error_hash)), 'hash'],
+        ['Lần đầu thấy', r => fmt(r.first_seen), 'text-sm text-muted'],
+        ['Lần cuối thấy', r => fmt(r.last_seen), 'text-sm text-muted'],
+        ['Tổng số lần', r => r.occurrence_count, 'num'],
+      ],
+      rows
+    );
+  } catch (e) { $('groups').textContent = '⚠ ' + e.message; }
 }
+
 async function loadDevice() {
-  try { $("devlogs").innerHTML = table([["Thời điểm", r => fmt(r.log_time)], ["Loại lỗi", r => esc(r.error_type)], ["Mức độ", r => esc(r.severity)], ["Thông báo", r => esc(r.message)]],
-    await get(`/device/${encodeURIComponent($("qdevice").value.trim())}`)); } catch (e) { $("devlogs").textContent = e.message; }
+  try {
+    const rows = await get(`/device/${encodeURIComponent($('qdevice').value)}`);
+    $('devlogs').innerHTML = table(
+      [
+        ['Thời điểm', r => `<span class="text-sm text-muted">${fmt(r.log_time)}</span>`],
+        ['Loại lỗi', r => `<span class="text-error-type">${esc(r.error_type)}</span>`],
+        ['Mức độ', r => sevBadge(r.severity)],
+        ['Thông báo', r => `<span class="text-sm">${esc((r.message||'').slice(0,80))}</span>`],
+      ],
+      rows
+    );
+  } catch (e) { $('devlogs').textContent = '⚠ ' + e.message; }
 }
+
 async function loadTrend() {
-  try { $("trend").innerHTML = table([["Hạng", r => r.rank], ["Mã nhóm", r => esc(short(r.error_hash)), "hash"], ["Số lần", r => r.occurrence_count, "num"]], await get(`/trend/${app()}`)); }
-  catch (e) { $("trend").textContent = e.message; }
+  try {
+    const rows = await get(`/trend/${appEnc()}`);
+    $('trend').innerHTML = table(
+      [
+        ['Hạng', r => rankBadge(r.rank), 'rank'],
+        ['Mã nhóm', r => esc(short(r.error_hash)), 'hash'],
+        ['Số lần', r => r.occurrence_count, 'num'],
+      ],
+      rows
+    );
+  } catch (e) { $('trend').textContent = '⚠ ' + e.message; }
 }
+
+// ─── Admin: Reset ────────────────────────────────────────────────────────────
+let _pendingAction = null;
+
+function confirmFlush(target) {
+  _pendingAction = target;
+  if (target === 'redis') {
+    $('confirm-title').textContent = '⚠️ Xác nhận Reset Redis';
+    $('confirm-body').innerHTML = 'Thao tác này sẽ xoá <strong>toàn bộ dữ liệu Redis</strong> (rate-limit, dedup, errtrend, recent_errors…)<br><br>Dữ liệu trong <strong>Cassandra vẫn được giữ nguyên</strong>. Bạn có chắc chắn?';
+    $('confirm-ok').className = 'btn-warning';
+    $('confirm-ok').textContent = 'Xác nhận Reset Redis';
+  } else {
+    $('confirm-title').textContent = '🚨 Xác nhận Reset Cassandra';
+    $('confirm-body').innerHTML = 'Thao tác này sẽ <strong>TRUNCATE toàn bộ 6 bảng Cassandra</strong>:<br><code>error_logs, error_logs_by_device, error_logs_by_hash,<br>error_groups, error_group_counter, error_trend_daily</code><br><br><strong style="color:#f87171">⚠ Không thể hoàn tác! Mọi dữ liệu sẽ bị xoá vĩnh viễn.</strong>';
+    $('confirm-ok').className = 'btn-danger';
+    $('confirm-ok').textContent = '🗃️ Xác nhận Reset Cassandra';
+  }
+  $('confirm-overlay').style.display = 'flex';
+}
+
+function closeConfirm() { $('confirm-overlay').style.display = 'none'; }
+
+async function doConfirmedAction() {
+  closeConfirm();
+  if (_pendingAction === 'redis') {
+    const btn = $('btn-flush');
+    btn.disabled = true; btn.textContent = '⏳ Đang reset…';
+    try {
+      const r = await fetch('/admin/redis-flush', { method: 'POST' });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      clearStats();
+      setMsg('✅ Đã flush Redis thành công. Tất cả bộ đếm đã được đặt lại.', 'success');
+      refresh();
+    } catch (e) { setMsg('❌ Không thể flush Redis: ' + e.message, 'error'); }
+    btn.disabled = false; btn.textContent = '🗑️ Reset Redis';
+  } else if (_pendingAction === 'cassandra') {
+    const btn = $('btn-cass-reset');
+    btn.disabled = true; btn.textContent = '⏳ Đang truncate…';
+    try {
+      const r = await fetch('/admin/cassandra-reset', { method: 'POST' });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      setMsg('✅ Đã truncate toàn bộ 6 bảng Cassandra thành công.', 'success');
+      refresh();
+    } catch (e) { setMsg('❌ Không thể reset Cassandra: ' + e.message, 'error'); }
+    btn.disabled = false; btn.textContent = '🗃️ Reset Cassandra';
+  }
+  _pendingAction = null;
+}
+
+// ─── Live dot ──────────────────────────────────────────────────────────────
+$('auto').addEventListener('change', function() {
+  $('live-dot').style.opacity = this.checked ? '1' : '0.2';
+});
+
+// ─── Auto-refresh ──────────────────────────────────────────────────────────
 function refresh() { loadTop(); loadRecent(); loadGroups(); loadTrend(); }
-refresh(); loadDevice();
-setInterval(() => { if ($("auto").checked) refresh(); }, 3000);
+refresh();
+loadDevice();
+setInterval(() => { if ($('auto').checked) refresh(); }, 3000);
+
+// Close modal on backdrop click
+$('confirm-overlay').addEventListener('click', function(e) {
+  if (e.target === this) closeConfirm();
+});
 </script>
 </body>
 </html>

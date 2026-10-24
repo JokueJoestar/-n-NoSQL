@@ -99,10 +99,88 @@ def device(device_id: str, day: Optional[str] = None, n: int = 50):
     return store.device_logs(device_id, parse_day(day), n)
 
 
+@app.get("/stats/{app_id}")
+def stats_summary(app_id: str):
+    """Thong ke tong hop hom nay: logs, so nhom, worker status."""
+    date_str = today().isoformat()
+    trend_key = f"errtrend:{app_id}:{date_str}"
+    try:
+        rows = r.zrevrange(trend_key, 0, -1, withscores=True)
+        logs_today = int(sum(s for _, s in rows))
+        groups_redis = len(rows)
+    except redis.RedisError:
+        logs_today = 0
+        groups_redis = 0
+    try:
+        groups_cass = store.count_error_groups(app_id)
+    except Exception:
+        groups_cass = 0
+    last_ms  = r.get("worker:last_sync")
+    last_cnt = r.get("worker:last_count")
+    return {
+        "logs_today":           logs_today,
+        "groups_redis":         groups_redis,
+        "groups_cassandra":     groups_cass,
+        "worker_last_sync_ms":  int(last_ms)  if last_ms  else None,
+        "worker_last_count":    int(last_cnt) if last_cnt else 0,
+    }
+
+
+@app.get("/hash/{app_id}/{error_hash}")
+def hash_detail(app_id: str, error_hash: str, day: Optional[str] = None, n: int = 50):
+    """Log cua tat ca thiet bi gap cung 1 loi - doc tu Cassandra (error_logs_by_hash)."""
+    return store.hash_logs(app_id, error_hash, parse_day(day), n)
+
+
 @app.get("/trend/{app_id}")
-def trend(app_id: str, day: Optional[str] = None, n: int = 20):
-    """Top loi da luu - doc tu Cassandra (error_trend_daily)."""
+def trend_today(app_id: str, day: Optional[str] = None, n: int = 20):
+    """Top loi do worker chup trong ngay (mac dinh hom nay) - doc tu Cassandra error_trend_daily."""
     return store.trend(app_id, parse_day(day), n)
+
+
+@app.get("/trend/multi/{app_id}")
+def trend_multi(app_id: str, days: int = 7):
+    """Xu huong loi trong N ngay gan nhat - doc tu Cassandra error_trend_daily."""
+    groups_map = {row.error_hash: row.error_type
+                  for row in store.s.execute(store.sel_groups, (app_id,))}
+    result = []
+    base = today()
+    for i in range(days - 1, -1, -1):
+        d = base - dt.timedelta(days=i)
+        for row in store.trend(app_id, d, 5):
+            result.append({
+                "date":       d.isoformat(),
+                "error_hash": row["error_hash"],
+                "error_type": groups_map.get(row["error_hash"], row["error_hash"][:10] + "…"),
+                "count":      row["occurrence_count"],
+            })
+    return result
+
+
+
+@app.post("/admin/redis-flush")
+def admin_redis_flush():
+    """Xoa toan bo du lieu Redis (FLUSHALL). Chi dung cho moi truong phat trien / kiem thu."""
+    try:
+        r.flushall()
+        return {"status": "ok", "message": "Redis FLUSHALL thanh cong"}
+    except redis.RedisError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/admin/cassandra-reset")
+def admin_cassandra_reset():
+    """TRUNCATE 6 bang Cassandra. Chi dung cho moi truong phat trien / kiem thu."""
+    tables = [
+        "error_logs", "error_logs_by_device", "error_logs_by_hash",
+        "error_groups", "error_group_counter", "error_trend_daily",
+    ]
+    try:
+        for t in tables:
+            store.s.execute(f"TRUNCATE {t}", timeout=120)
+        return {"status": "ok", "truncated": tables}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/")

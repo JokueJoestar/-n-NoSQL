@@ -20,6 +20,8 @@ class Store:
         self.sel_counter = p("SELECT error_hash, occurrence_count FROM error_group_counter WHERE app_id = ?")
         self.sel_device = p("SELECT toTimestamp(log_id) AS log_time, app_id, error_type, severity, message FROM error_logs_by_device WHERE device_id = ? AND log_date = ? LIMIT ?")
         self.sel_trend = p("SELECT rank, error_hash, occurrence_count FROM error_trend_daily WHERE app_id = ? AND log_date = ? LIMIT ?")
+        self.sel_hash = p("SELECT toTimestamp(log_id) AS log_time, device_id, severity FROM error_logs_by_hash WHERE app_id = ? AND error_hash = ? AND log_date = ? LIMIT ?")
+        self.count_groups = p("SELECT COUNT(*) FROM error_groups WHERE app_id = ?")
 
     def write_log(self, d):
         """Ghi 3 bang song song. Cung log_id nen retry an toan (idempotent)."""
@@ -55,3 +57,13 @@ class Store:
 
     def trend(self, app_id, day, limit=20):
         return [dict(r._asdict()) for r in self.s.execute(self.sel_trend, (app_id, day, limit))]
+
+    def hash_logs(self, app_id, error_hash, day, limit=50):
+        """Log cua mot nhom loi (tat ca thiet bi gap cung 1 loi) - tu error_logs_by_hash."""
+        rows = self.s.execute(self.sel_hash, (app_id, error_hash, day, limit))
+        return [{"log_time": r.log_time, "device_id": r.device_id, "severity": r.severity} for r in rows]
+
+    def count_error_groups(self, app_id):
+        """Dem so nhom loi cua mot app trong Cassandra."""
+        row = self.s.execute(self.count_groups, (app_id,)).one()
+        return int(row[0]) if row else 0
